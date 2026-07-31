@@ -1,7 +1,7 @@
 .PHONY: build test vet lint fmt-check
 
 build:
-	go build -o bin/recall ./cmd/recall
+	go build -o bin/refrain ./cmd/refrain
 
 test:
 	go test -race ./...

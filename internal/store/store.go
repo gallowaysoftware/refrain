@@ -78,7 +78,7 @@ func (s *Store) EnsureRepo() error {
 	if err := os.WriteFile(filepath.Join(s.root, ".gitignore"), []byte(gitignore), 0o644); err != nil {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
-	if out, err := s.commitLocked([]string{".gitignore"}, "recall: initialize memory root"); err != nil {
+	if out, err := s.commitLocked([]string{".gitignore"}, "refrain: initialize memory root"); err != nil {
 		return fmt.Errorf("initial commit: %s: %w", out, err)
 	}
 	return nil
@@ -89,8 +89,8 @@ func (s *Store) EnsureRepo() error {
 func (s *Store) git(args ...string) (string, error) {
 	full := append([]string{
 		"-C", s.root,
-		"-c", "user.name=recall",
-		"-c", "user.email=recall@localhost",
+		"-c", "user.name=refrain",
+		"-c", "user.email=refrain@localhost",
 	}, args...)
 	out, err := exec.Command("git", full...).CombinedOutput()
 	return strings.TrimSpace(string(out)), err
@@ -123,7 +123,7 @@ func (s *Store) commitLocked(paths []string, msg string) (string, error) {
 				_, _ = s.git("reset", "-q", "--", p)
 			}
 			if status, _ := s.git("diff", "--cached", "--name-only"); status != "" {
-				if out, err := s.git("commit", "-q", "-m", "recall: checkpoint external edits"); err != nil {
+				if out, err := s.git("commit", "-q", "-m", "refrain: checkpoint external edits"); err != nil {
 					return out, fmt.Errorf("checkpoint commit: %w", err)
 				}
 			}
@@ -203,7 +203,7 @@ func (s *Store) CreateExpert(expert, description string) error {
 		}
 		paths = append(paths, filepath.Join(expert, name))
 	}
-	if out, err := s.commitLocked(paths, fmt.Sprintf("recall(%s): create expert", expert)); err != nil {
+	if out, err := s.commitLocked(paths, fmt.Sprintf("refrain(%s): create expert", expert)); err != nil {
 		return fmt.Errorf("commit scaffold: %s: %w", out, err)
 	}
 	return nil
@@ -320,7 +320,7 @@ func (s *Store) RecordDecision(expert, decision, why string) error {
 	entry := fmt.Sprintf("\n## %s — %s\n\n**Why:** %s\n",
 		s.now().UTC().Format("2006-01-02"), strings.TrimSpace(decision), strings.TrimSpace(why))
 	return s.appendFile(expert, "decisions.md", entry,
-		fmt.Sprintf("recall(%s): decision — %s", expert, firstLine(decision, 60)))
+		fmt.Sprintf("refrain(%s): decision — %s", expert, firstLine(decision, 60)))
 }
 
 // AppendSessionLog appends a dated session summary to log.md.
@@ -330,7 +330,7 @@ func (s *Store) AppendSessionLog(expert, summary string) error {
 	}
 	entry := fmt.Sprintf("\n## %s\n\n%s\n", s.now().UTC().Format("2006-01-02"), strings.TrimSpace(summary))
 	return s.appendFile(expert, "log.md", entry,
-		fmt.Sprintf("recall(%s): session log", expert))
+		fmt.Sprintf("refrain(%s): session log", expert))
 }
 
 // RecordNote appends to (or creates) a topic note.
@@ -361,7 +361,7 @@ func (s *Store) RecordNote(expert, topic, content string) error {
 		return fmt.Errorf("write note: %w", err)
 	}
 	if out, err := s.commitLocked([]string{filepath.Join(expert, "notes", topic+".md")},
-		fmt.Sprintf("recall(%s): note %s", expert, topic)); err != nil {
+		fmt.Sprintf("refrain(%s): note %s", expert, topic)); err != nil {
 		return fmt.Errorf("commit note: %s: %w", out, err)
 	}
 	return nil
@@ -390,7 +390,7 @@ func (s *Store) ReplaceFile(expert, file, content string) error {
 		return fmt.Errorf("write %s: %w", file, err)
 	}
 	if out, err := s.commitLocked([]string{filepath.Join(expert, file)},
-		fmt.Sprintf("recall(%s): update %s", expert, file)); err != nil {
+		fmt.Sprintf("refrain(%s): update %s", expert, file)); err != nil {
 		return fmt.Errorf("commit %s: %s: %w", file, out, err)
 	}
 	return nil

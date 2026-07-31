@@ -72,4 +72,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/gallowaysoftware/recall
+        - github.com/gallowaysoftware/refrain

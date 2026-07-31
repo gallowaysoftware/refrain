@@ -1,4 +1,4 @@
-# recall
+# refrain
 
 Personal-memory service for domain-expert agents: git-backed markdown
 memory per expert, exposed as MCP tools at `/mcp` plus an injection
@@ -11,7 +11,7 @@ TTL). Design rationale: `docs/design.md`.
 
 | Path | Purpose |
 | ---- | ------- |
-| `cmd/recall` | Entry point: env config, mux, logging middleware, graceful shutdown |
+| `cmd/refrain` | Entry point: env config, mux, logging middleware, graceful shutdown |
 | `internal/store` | Single-writer store over the git-backed memory root; all mutations commit |
 | `internal/mcpserver` | MCP tools (Streamable HTTP) + the plain-HTTP digest handler |
 | `deploy/` | Reference compose stack (macvlan) + Dockerfile |

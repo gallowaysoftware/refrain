@@ -1,4 +1,4 @@
-module github.com/gallowaysoftware/recall
+module github.com/gallowaysoftware/refrain
 
 go 1.26.5
 

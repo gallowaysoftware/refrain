@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gallowaysoftware/recall/internal/store"
+	"github.com/gallowaysoftware/refrain/internal/store"
 )
 
 func TestDigestHandler(t *testing.T) {

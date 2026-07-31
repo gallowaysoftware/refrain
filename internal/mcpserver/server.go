@@ -1,8 +1,8 @@
-// Package mcpserver exposes the recall store as MCP tools (Streamable
+// Package mcpserver exposes the refrain store as MCP tools (Streamable
 // HTTP) plus the plain-HTTP digest endpoint. Two protocols because
 // memory reaches the model through two mechanisms: the digest is
 // INJECTED by the harness at chat start (an Open WebUI inlet filter, a
-// Claude Code hook), while the tools serve deep recall and writes
+// Claude Code hook), while the tools serve deep memory reads and writes
 // during the conversation. Tools alone would fail — the model can't
 // search for what it doesn't know it forgot.
 //
@@ -23,7 +23,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/gallowaysoftware/recall/internal/store"
+	"github.com/gallowaysoftware/refrain/internal/store"
 )
 
 // memoryStore is the store surface the tools need.
@@ -52,8 +52,8 @@ type Deps struct {
 // Handler returns the Streamable HTTP handler to mount at /mcp.
 func Handler(deps Deps) http.Handler {
 	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "recall",
-		Title:   "Recall — personal memory for domain experts",
+		Name:    "refrain",
+		Title:   "Refrain — personal memory for domain experts",
 		Version: deps.Version,
 	}, nil)
 
@@ -144,7 +144,7 @@ func DigestHandler(deps Deps) http.Handler {
 				http.Error(w, "unknown expert", http.StatusNotFound)
 				return
 			}
-			slog.Error("recall: digest failed", "expert", expert, "error", err)
+			slog.Error("refrain: digest failed", "expert", expert, "error", err)
 			http.Error(w, "digest failed", http.StatusInternalServerError)
 			return
 		}
@@ -165,7 +165,7 @@ type expertInfo struct {
 func (d Deps) listExperts(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, expertsOutput, error) {
 	experts, err := d.Store.ListExperts()
 	if err != nil {
-		slog.Error("recall: list experts failed", "error", err)
+		slog.Error("refrain: list experts failed", "error", err)
 		return nil, expertsOutput{}, fmt.Errorf("list experts failed")
 	}
 	out := expertsOutput{Experts: make([]expertInfo, 0, len(experts))}

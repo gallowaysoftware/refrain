@@ -1,4 +1,4 @@
-# Deploying recall
+# Deploying refrain
 
 One container, one volume. The container image needs the `git` binary
 (every write is a commit), which the Dockerfile already installs.
@@ -6,18 +6,18 @@ One container, one volume. The container image needs the `git` binary
 ## Bring-up
 
 1. `cp .env.example .env` and replace every `REPLACE-` value:
-   `RECALL_IPV4` (a free LAN IP on the macvlan network) and
-   `RECALL_DATA` (host path for the memory root).
+   `REFRAIN_IPV4` (a free LAN IP on the macvlan network) and
+   `REFRAIN_DATA` (host path for the memory root).
 2. `docker compose up -d --build`
 3. Sanity check — from another LAN box, not the docker host (macvlan
    isolation blocks host-to-container traffic):
 
    ```bash
-   curl http://<RECALL_IPV4>:8092/healthz
+   curl http://<REFRAIN_IPV4>:8092/healthz
    ```
 
 The reference compose file assumes a pre-existing macvlan network named
-`br0` so sibling containers and LAN/VPN clients reach recall directly by
+`br0` so sibling containers and LAN/VPN clients reach refrain directly by
 IP. If that isn't your pattern, replace the `networks` block with a
 bridge network and publish port 8092.
 
@@ -25,7 +25,7 @@ On Unraid, add these labels to the service for a WebUI link and shell:
 
 ```yaml
     labels:
-      net.unraid.docker.webui: "http://${RECALL_IPV4}:8092/healthz"
+      net.unraid.docker.webui: "http://${REFRAIN_IPV4}:8092/healthz"
       net.unraid.docker.shell: "sh"
 ```
 
@@ -46,7 +46,7 @@ Memory reaches the model through both endpoints, deliberately:
   fetches the digest at chat start and prepends it as system context.
   This is what makes memory reliable: a model cannot search for what it
   doesn't know it forgot.
-- **Tools** (`/mcp`): deep recall (read whole files, grep) and all
+- **Tools** (`/mcp`): deep memory reads (read whole files, grep) and all
   writes during the conversation.
 
 Wire up both. Injection without tools means nothing new is ever
@@ -55,7 +55,7 @@ amnesiac. See `docs/design.md` for the full rationale.
 
 ## Security posture — read this
 
-**recall serves both endpoints unauthenticated, including write tools.**
+**refrain serves both endpoints unauthenticated, including write tools.**
 That is a deployment CHOICE this reference config makes: it assumes a
 trusted, private network (LAN/VPN only, no port forwarding, no reverse
 proxy exposing it beyond the segment). Anyone who can reach port 8092
@@ -69,7 +69,7 @@ reverse proxy in front before exposing it, or don't deploy this.
 
 ## Backups
 
-`RECALL_DATA` is a plain git repository of markdown — the only
+`REFRAIN_DATA` is a plain git repository of markdown — the only
 irreplaceable data in the stack. Back it up like one: copy it, or
 `git remote add` a private remote and push. The service needs no
 change either way.

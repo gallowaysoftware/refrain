@@ -1,6 +1,6 @@
 # Design decisions
 
-Recall is the personal-memory layer for domain-expert agents. It stores
+Refrain is the personal-memory layer for domain-expert agents. It stores
 the one class of data that cannot be rebuilt from any source: the
 user's own authored intent — goals, plans, decisions-with-why,
 preferences, session history. World knowledge, capability code, and
@@ -39,7 +39,7 @@ graduate into memory via the append-only session log.
 **Two mechanisms, both required.** The digest endpoint exists for
 harness-side INJECTION at chat start (profile, goals, recent
 decisions, last session — capped to a few hundred tokens); the MCP
-tools serve deep recall and writes during the conversation. Tools
+tools serve deep memory reads and writes during the conversation. Tools
 alone fail because a model cannot search for what it doesn't know it
 forgot; injection alone fails because nothing new would ever be
 recorded.

@@ -1,4 +1,4 @@
-// recall is a memory service for domain-expert agents:
+// refrain is a memory service for domain-expert agents:
 // git-backed markdown memory per domain expert, exposed two ways —
 // MCP tools at /mcp for in-conversation reads and writes, and the
 // injection digest at /digest for harness hooks (Open WebUI inlet
@@ -16,15 +16,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gallowaysoftware/recall/internal/mcpserver"
-	"github.com/gallowaysoftware/recall/internal/store"
+	"github.com/gallowaysoftware/refrain/internal/mcpserver"
+	"github.com/gallowaysoftware/refrain/internal/store"
 )
 
 var version = "dev"
 
 func main() {
 	// Config is two env vars; a config package would be ceremony.
-	root := envOr("RECALL_ROOT", "/data/memories")
+	root := envOr("REFRAIN_ROOT", "/data/memories")
 	port := envOr("PORT", "8092")
 	if os.Getenv("TARGET_ENV") != "local" {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
@@ -32,7 +32,7 @@ func main() {
 
 	st := store.New(root)
 	if err := st.EnsureRepo(); err != nil {
-		slog.Error("recall: memory root init failed", "root", root, "error", err)
+		slog.Error("refrain: memory root init failed", "root", root, "error", err)
 		os.Exit(1)
 	}
 
@@ -51,9 +51,9 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("recall: listening", "port", port, "root", root, "version", version)
+		slog.Info("refrain: listening", "port", port, "root", root, "version", version)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("recall: server failed", "error", err)
+			slog.Error("refrain: server failed", "error", err)
 			os.Exit(1)
 		}
 	}()
@@ -65,9 +65,9 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("recall: shutdown failed", "error", err)
+		slog.Error("refrain: shutdown failed", "error", err)
 	}
-	slog.Info("recall: stopped")
+	slog.Info("refrain: stopped")
 }
 
 func envOr(key, fallback string) string {
@@ -104,7 +104,7 @@ func logRequests(next http.Handler) http.Handler {
 		if r.URL.Path == "/healthz" {
 			return
 		}
-		slog.Info("recall: request", "method", r.Method, "path", r.URL.Path,
+		slog.Info("refrain: request", "method", r.Method, "path", r.URL.Path,
 			"status", sw.status, "duration", time.Since(start).Round(time.Millisecond).String())
 	})
 }

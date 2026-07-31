@@ -1,4 +1,4 @@
-# recall
+# refrain
 
 Personal memory for domain-expert agents: git-backed markdown memory
 per expert (profile, goals, decisions-with-why, session logs, topic
@@ -11,7 +11,7 @@ prepend at chat start.
 
 An agent that advises the same user across sessions needs to remember
 what the user decided and WHY — the one class of data that cannot be
-rebuilt from any source. Recall stores exactly that, and nothing else:
+rebuilt from any source. Refrain stores exactly that, and nothing else:
 
 - **Markdown in a git repo**, not database rows: human-legible,
   human-editable, and git history is the audit trail.
@@ -22,20 +22,20 @@ rebuilt from any source. Recall stores exactly that, and nothing else:
   commit; no delete tool exists — `git revert` is the undo.
 - **Two mechanisms**: the digest is injected at chat start (a model
   cannot search for what it doesn't know it forgot); the tools serve
-  deep recall and writes during the conversation.
+  deep memory reads and writes during the conversation.
 
 The full rationale is in [docs/design.md](docs/design.md).
 
 ## Quickstart
 
 ```bash
-go build -o bin/recall ./cmd/recall
-RECALL_ROOT=$HOME/recall-memories TARGET_ENV=local ./bin/recall
+go build -o bin/refrain ./cmd/refrain
+REFRAIN_ROOT=$HOME/refrain-memories TARGET_ENV=local ./bin/refrain
 curl http://localhost:8092/healthz
 ```
 
 The memory root is created (and `git init`-ed) on first start. Config
-is env vars: `RECALL_ROOT` (default `/data/memories`), `PORT` (default
+is env vars: `REFRAIN_ROOT` (default `/data/memories`), `PORT` (default
 `8092`), `TARGET_ENV` (`local` keeps text logs; anything else switches
 to JSON). Requires the `git` binary on `PATH`.
 
@@ -78,7 +78,7 @@ in [deploy/README.md](deploy/README.md).
 ## Development
 
 ```bash
-make build     # bin/recall
+make build     # bin/refrain
 make test      # go test -race ./...
 make vet
 make lint      # golangci-lint

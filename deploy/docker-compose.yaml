@@ -1,7 +1,7 @@
-# recall: git-backed markdown memory per domain expert, one container.
+# refrain: git-backed markdown memory per domain expert, one container.
 # Reference deployment: a macvlan network so sibling containers (an Open
 # WebUI stack, other agents) and LAN/VPN clients reach it directly by
-# IP. Macvlan gotcha: the docker HOST itself cannot reach RECALL_IPV4 —
+# IP. Macvlan gotcha: the docker HOST itself cannot reach REFRAIN_IPV4 —
 # verify from another LAN box. If macvlan isn't your pattern, swap the
 # networks block for an ordinary bridge and publish port 8092.
 #
@@ -17,21 +17,21 @@
 # Config: cp .env.example .env and replace every REPLACE- value.
 
 services:
-  recall:
+  refrain:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    container_name: recall
+    container_name: refrain
     restart: unless-stopped
     environment:
       TARGET_ENV: prod
       PORT: "8092"
-      RECALL_ROOT: /data/memories
+      REFRAIN_ROOT: /data/memories
     volumes:
-      - ${RECALL_DATA:?set in .env}:/data/memories
+      - ${REFRAIN_DATA:?set in .env}:/data/memories
     networks:
       macvlan:
-        ipv4_address: ${RECALL_IPV4:?set in .env}
+        ipv4_address: ${REFRAIN_IPV4:?set in .env}
 
 networks:
   macvlan:
