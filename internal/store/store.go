@@ -273,6 +273,13 @@ type SearchHit struct {
 	File string `json:"file"`
 	Line int    `json:"line"`
 	Text string `json:"text"`
+	// About is the containing file's self-description: its H1 plus first
+	// prose line. A matching line lifted out of a 30KB note is ambiguous
+	// on its own — "biomass, 4-6 week lead" reads very differently under
+	// "Forestry plan" than under "Equipment inventory" — so every hit
+	// carries what it came from. Derived, never authored: no frontmatter
+	// to maintain and no way for it to drift from the file.
+	About string `json:"about,omitempty"`
 }
 
 // Search scans an expert's memory files for lines containing ANY of the
@@ -294,11 +301,12 @@ func (s *Store) Search(expert, query string) ([]SearchHit, error) {
 		if err != nil {
 			continue
 		}
+		about := describe(content)
 		for i, line := range strings.Split(content, "\n") {
 			lower := strings.ToLower(line)
 			for _, t := range terms {
 				if strings.Contains(lower, t) {
-					hits = append(hits, SearchHit{File: f, Line: i + 1, Text: strings.TrimSpace(line)})
+					hits = append(hits, SearchHit{File: f, Line: i + 1, Text: strings.TrimSpace(line), About: about})
 					break
 				}
 			}
@@ -422,6 +430,124 @@ func (s *Store) appendFile(expert, file, entry, msg string) error {
 		return fmt.Errorf("commit %s: %s: %w", file, out, err)
 	}
 	return nil
+}
+
+// describe derives a file's one-line self-description: its H1 title and
+// the first prose line under it. Blank when a file has neither.
+func describe(content string) string {
+	var title, first string
+	for _, line := range strings.Split(content, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "# ") && title == "" {
+			title = strings.TrimSpace(t[2:])
+			continue
+		}
+		if strings.HasPrefix(t, "#") || strings.HasPrefix(t, ">") {
+			continue // deeper headings and quotes are not a description
+		}
+		first = t
+		break
+	}
+	switch {
+	case title != "" && first != "":
+		return capRunes(title+" — "+first, 200)
+	case title != "":
+		return title
+	default:
+		return capRunes(first, 200)
+	}
+}
+
+// sliceLines returns a 1-indexed line window of content. A zero from
+// means the start; a zero or negative count means to the end. Slicing
+// exists because a memory file can be long enough that reading it whole
+// is the expensive thing an agent does in a turn.
+func sliceLines(content string, from, count int) string {
+	lines := strings.Split(content, "\n")
+	if from > len(lines) {
+		return ""
+	}
+	if from > 1 {
+		lines = lines[from-1:]
+	}
+	if count > 0 && count < len(lines) {
+		lines = lines[:count]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ReadFileLines reads a memory file, optionally windowed to a line
+// range, and reports the file's total line count so a caller can tell
+// whether it received the whole thing.
+func (s *Store) ReadFileLines(expert, file string, from, count int) (text string, totalLines int, err error) {
+	content, err := s.ReadFile(expert, file)
+	if err != nil {
+		return "", 0, err
+	}
+	total := strings.Count(content, "\n") + 1
+	if from <= 0 && count <= 0 {
+		return content, total, nil
+	}
+	return sliceLines(content, from, count), total, nil
+}
+
+// MultiFile is one file returned by ReadFiles.
+type MultiFile struct {
+	File       string `json:"file"`
+	About      string `json:"about,omitempty"`
+	Text       string `json:"text"`
+	TotalLines int    `json:"total_lines"`
+	Truncated  bool   `json:"truncated,omitempty"`
+}
+
+// ReadFiles reads every memory file of an expert whose path matches a
+// glob (filepath.Match semantics against the memory-relative path, e.g.
+// "notes/*"), capping each file's returned lines. One call for "show me
+// all the notes" beats N round trips, and the per-file cap keeps a wide
+// pattern from blowing the caller's context.
+func (s *Store) ReadFiles(expert, pattern string, maxLinesPerFile int) ([]MultiFile, error) {
+	files, err := s.ListFiles(expert)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(pattern) == "" {
+		return nil, fmt.Errorf("pattern is required (e.g. \"notes/*\" or \"*.md\")")
+	}
+	if maxLinesPerFile <= 0 {
+		maxLinesPerFile = 200
+	}
+	var out []MultiFile
+	for _, f := range files {
+		ok, err := filepath.Match(pattern, f)
+		if err != nil {
+			return nil, fmt.Errorf("bad pattern %q: %w", pattern, err)
+		}
+		if !ok {
+			continue
+		}
+		content, err := s.ReadFile(expert, f)
+		if err != nil {
+			continue
+		}
+		total := strings.Count(content, "\n") + 1
+		text := content
+		truncated := false
+		if total > maxLinesPerFile {
+			text = sliceLines(content, 1, maxLinesPerFile)
+			truncated = true
+		}
+		out = append(out, MultiFile{
+			File: f, About: describe(content), Text: text,
+			TotalLines: total, Truncated: truncated,
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no memory files match %q", pattern)
+	}
+	return out, nil
 }
 
 // session is the ephemeral scratch state, persisted outside git.
