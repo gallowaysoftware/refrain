@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -32,6 +33,8 @@ type memoryStore interface {
 	CreateExpert(expert, description string) error
 	ListFiles(expert string) ([]string, error)
 	ReadFile(expert, file string) (string, error)
+	ReadFileLines(expert, file string, from, count int) (string, int, error)
+	ReadFiles(expert, pattern string, maxLinesPerFile int) ([]store.MultiFile, error)
 	Search(expert, query string) ([]store.SearchHit, error)
 	RecordDecision(expert, decision, why string) error
 	RecordNote(expert, topic, content string) error
@@ -72,10 +75,19 @@ func Handler(deps Deps) http.Handler {
 	}, deps.readMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name: "read_many",
+		Description: "Read every memory file matching a glob in one call — 'notes/*' for all " +
+			"topic notes, '*.md' for the core files. Each file comes back with its " +
+			"self-description and is capped at max_lines_per_file, so a wide pattern stays " +
+			"affordable. Prefer this over repeated read_memory calls.",
+	}, deps.readMany)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name: "search_memory",
 		Description: "Search an expert's memory files for lines matching any query term. " +
 			"Use for 'did we already decide/discuss X?' before answering questions about the " +
-			"user's plans or history.",
+			"user's plans or history. Each hit carries the containing file's description, " +
+			"so you can tell a decision from a stray mention without a second call.",
 	}, deps.searchMemory)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -180,20 +192,27 @@ func (d Deps) listExperts(ctx context.Context, _ *mcp.CallToolRequest, _ struct{
 }
 
 type readInput struct {
-	Expert string `json:"expert" jsonschema:"expert slug from list_experts"`
-	File   string `json:"file" jsonschema:"memory file: profile.md, goals.md, decisions.md, log.md, or notes/<topic>.md"`
+	Expert   string `json:"expert" jsonschema:"expert slug from list_experts"`
+	File     string `json:"file" jsonschema:"memory file: profile.md, goals.md, decisions.md, log.md, or notes/<topic>.md"`
+	FromLine int    `json:"from_line,omitempty" jsonschema:"1-indexed first line to return; omit for the whole file"`
+	MaxLines int    `json:"max_lines,omitempty" jsonschema:"maximum lines to return; omit for the whole file"`
 }
 
 type readOutput struct {
-	Content string `json:"content"`
+	Content    string `json:"content"`
+	TotalLines int    `json:"total_lines"`
+	// Partial says the window returned is less than the whole file, so a
+	// caller knows to ask for more rather than assume it has everything.
+	Partial bool `json:"partial,omitempty"`
 }
 
 func (d Deps) readMemory(ctx context.Context, _ *mcp.CallToolRequest, in readInput) (*mcp.CallToolResult, readOutput, error) {
-	content, err := d.Store.ReadFile(in.Expert, in.File)
+	content, total, err := d.Store.ReadFileLines(in.Expert, in.File, in.FromLine, in.MaxLines)
 	if err != nil {
 		return nil, readOutput{}, err
 	}
-	return nil, readOutput{Content: content}, nil
+	returned := strings.Count(content, "\n") + 1
+	return nil, readOutput{Content: content, TotalLines: total, Partial: returned < total}, nil
 }
 
 type searchInput struct {
@@ -211,6 +230,24 @@ func (d Deps) searchMemory(ctx context.Context, _ *mcp.CallToolRequest, in searc
 		return nil, searchOutput{}, err
 	}
 	return nil, searchOutput{Hits: hits}, nil
+}
+
+type readManyInput struct {
+	Expert          string `json:"expert" jsonschema:"expert slug"`
+	Pattern         string `json:"pattern" jsonschema:"glob over memory-relative paths, e.g. notes/* or *.md"`
+	MaxLinesPerFile int    `json:"max_lines_per_file,omitempty" jsonschema:"per-file line cap, default 200"`
+}
+
+type readManyOutput struct {
+	Files []store.MultiFile `json:"files"`
+}
+
+func (d Deps) readMany(ctx context.Context, _ *mcp.CallToolRequest, in readManyInput) (*mcp.CallToolResult, readManyOutput, error) {
+	files, err := d.Store.ReadFiles(in.Expert, in.Pattern, in.MaxLinesPerFile)
+	if err != nil {
+		return nil, readManyOutput{}, err
+	}
+	return nil, readManyOutput{Files: files}, nil
 }
 
 type decisionInput struct {
