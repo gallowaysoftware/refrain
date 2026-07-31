@@ -1,0 +1,39 @@
+# recall: git-backed markdown memory per domain expert, one container.
+# Reference deployment: a macvlan network so sibling containers (an Open
+# WebUI stack, other agents) and LAN/VPN clients reach it directly by
+# IP. Macvlan gotcha: the docker HOST itself cannot reach RECALL_IPV4 —
+# verify from another LAN box. If macvlan isn't your pattern, swap the
+# networks block for an ordinary bridge and publish port 8092.
+#
+# The memory root is a LOCAL git repository on the host. It is the only
+# irreplaceable data in this stack — everything else is rebuildable from
+# this repo. Back it up accordingly (it is small; the whole point is
+# that it's just markdown + .git). Adding a private remote later is one
+# `git remote add` away and the service needs no change.
+#
+# Endpoints (:8092): /mcp (MCP streamable HTTP tools), /digest?expert=
+# (injection block for harness hooks), /healthz.
+#
+# Config: cp .env.example .env and replace every REPLACE- value.
+
+services:
+  recall:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: recall
+    restart: unless-stopped
+    environment:
+      TARGET_ENV: prod
+      PORT: "8092"
+      RECALL_ROOT: /data/memories
+    volumes:
+      - ${RECALL_DATA:?set in .env}:/data/memories
+    networks:
+      macvlan:
+        ipv4_address: ${RECALL_IPV4:?set in .env}
+
+networks:
+  macvlan:
+    external: true
+    name: br0
