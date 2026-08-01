@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -241,6 +242,192 @@ func TestNoOpWriteMakesNoCommit(t *testing.T) {
 	}
 	if got := commitCount(t, s); got != before {
 		t.Errorf("identical write created a commit (%d -> %d)", before, got)
+	}
+}
+
+func TestSetGetStateRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.CreateExpert("x4", "d"); err != nil {
+		t.Fatalf("CreateExpert: %v", err)
+	}
+
+	// Unset key is a clean not-found, not a read error.
+	if _, err := s.GetState("x4", "mastery"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetState unset = %v, want ErrNotFound", err)
+	}
+
+	before := commitCount(t, s)
+	value := json.RawMessage(`{"course_slug":"x4-econ","due":4,"coverage":{"questions":12,"mastered":3}}`)
+	if err := s.SetState("x4", "mastery", value); err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+	if got := commitCount(t, s); got != before+1 {
+		t.Errorf("commits = %d, want %d (state write commits)", got, before+1)
+	}
+	out, err := s.git("log", "--format=%s", "-n", "1")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if !strings.Contains(out, "state: set mastery") {
+		t.Errorf("commit message = %q, want it to name the state write", out)
+	}
+
+	raw, err := s.GetState("x4", "mastery")
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("stored state is not JSON: %v\n%s", err, raw)
+	}
+	if got["course_slug"] != "x4-econ" || got["due"] != float64(4) {
+		t.Errorf("round trip mismatch: %v", got)
+	}
+	// Stored canonical (pretty-printed), so git diffs of machine writes stay minimal.
+	if !strings.Contains(string(raw), "\n  \"due\": 4") {
+		t.Errorf("state not stored pretty-printed:\n%s", raw)
+	}
+
+	// Guardrails: traversal-proof keys and valid JSON only.
+	if err := s.SetState("x4", "../evil", value); err == nil {
+		t.Error("bad key accepted")
+	}
+	if err := s.SetState("x4", "broken", json.RawMessage(`{not json`)); err == nil {
+		t.Error("invalid JSON accepted")
+	}
+	if err := s.SetState("nope", "mastery", value); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetState unknown expert = %v, want ErrNotFound", err)
+	}
+}
+
+func TestStateExcludedFromSearchAndReadMany(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.CreateExpert("x4", "d"); err != nil {
+		t.Fatalf("CreateExpert: %v", err)
+	}
+	// A token that exists ONLY inside state, never in prose memory.
+	if err := s.SetState("x4", "mastery", json.RawMessage(`{"note":"zyxblindspot"}`)); err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+
+	files, err := s.ListFiles("x4")
+	if err != nil {
+		t.Fatalf("ListFiles: %v", err)
+	}
+	for _, f := range files {
+		if strings.HasPrefix(f, "state/") {
+			t.Errorf("ListFiles surfaced state file %q", f)
+		}
+	}
+
+	hits, err := s.Search("x4", "zyxblindspot")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 0 {
+		t.Errorf("search surfaced state content: %+v", hits)
+	}
+
+	// Even a glob aimed directly at the subtree must not read it back.
+	if _, err := s.ReadFiles("x4", "state/*", 0); err == nil {
+		t.Error("read_many matched state/*")
+	}
+	all, err := s.ReadFiles("x4", "*", 0)
+	if err != nil {
+		t.Fatalf("ReadFiles *: %v", err)
+	}
+	for _, f := range all {
+		if strings.Contains(f.Text, "zyxblindspot") {
+			t.Errorf("read_many surfaced state content in %s", f.File)
+		}
+	}
+}
+
+const masteryFixture = `{
+  "course_slug": "x4-econ",
+  "updated": "2026-08-01T12:00:00Z",
+  "coverage": {"questions": 12, "attempted": 7, "mastered": 3, "mastered_pct": 25},
+  "due": 4,
+  "blindspots": [{"topic": "trade-routes", "note": "keeps confusing buy and sell sides"}],
+  "weak_units": [
+    {"unit": "station-building", "mastered_pct": 40},
+    {"unit": "boarding", "mastered_pct": 10}
+  ]
+}`
+
+func TestDigestMasterySection(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.CreateExpert("x4", "d"); err != nil {
+		t.Fatalf("CreateExpert: %v", err)
+	}
+	if err := s.SetState("x4", "mastery", json.RawMessage(masteryFixture)); err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+
+	digest, err := s.Digest("x4")
+	if err != nil {
+		t.Fatalf("Digest: %v", err)
+	}
+	for _, want := range []string{
+		"## Mastery",
+		"3/12 questions mastered (25%; 7 attempted)",
+		"Due for review: 4",
+		"trade-routes — keeps confusing buy and sell sides",
+	} {
+		if !strings.Contains(digest, want) {
+			t.Errorf("digest missing %q:\n%s", want, digest)
+		}
+	}
+	// Weak units render weakest first regardless of file order.
+	weak := strings.Index(digest, "boarding — 10% mastered")
+	strong := strings.Index(digest, "station-building — 40% mastered")
+	if weak < 0 || strong < 0 || weak > strong {
+		t.Errorf("weak units not ordered weakest-first:\n%s", digest)
+	}
+}
+
+func TestDigestMasteryDegrades(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.CreateExpert("x4", "d"); err != nil {
+		t.Fatalf("CreateExpert: %v", err)
+	}
+
+	// No mastery file: no section, no error.
+	plain, err := s.Digest("x4")
+	if err != nil {
+		t.Fatalf("Digest without mastery: %v", err)
+	}
+	if strings.Contains(plain, "## Mastery") {
+		t.Errorf("digest without mastery file has a Mastery section:\n%s", plain)
+	}
+
+	// Malformed file on disk (a crashed writer): digest must survive.
+	stateDir := filepath.Join(s.root, "x4", "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "mastery.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	broken, err := s.Digest("x4")
+	if err != nil {
+		t.Fatalf("Digest with malformed mastery: %v", err)
+	}
+	if strings.Contains(broken, "## Mastery") {
+		t.Errorf("malformed mastery rendered a section:\n%s", broken)
+	}
+
+	// Partial file (writer ahead of/behind the schema): renders what it has.
+	if err := os.WriteFile(filepath.Join(stateDir, "mastery.json"),
+		[]byte(`{"due": 9, "future_key": {"nested": true}}`), 0o644); err != nil {
+		t.Fatalf("write partial: %v", err)
+	}
+	partial, err := s.Digest("x4")
+	if err != nil {
+		t.Fatalf("Digest with partial mastery: %v", err)
+	}
+	if !strings.Contains(partial, "Due for review: 9") || strings.Contains(partial, "future_key") {
+		t.Errorf("partial mastery mis-rendered:\n%s", partial)
 	}
 }
 

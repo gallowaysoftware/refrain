@@ -40,8 +40,11 @@ is env vars: `REFRAIN_ROOT` (default `/data/memories`), `PORT` (default
 to JSON). Requires the `git` binary on `PATH`.
 
 For a container deployment see [deploy/](deploy/README.md); for the
-Open WebUI injection filter see
-[integrations/openwebui/](integrations/openwebui/README.md).
+harness injection hooks see
+[integrations/openwebui/](integrations/openwebui/README.md) (Open WebUI
+inlet filter) and
+[integrations/claudecode/](integrations/claudecode/README.md) (Claude
+Code SessionStart hook).
 
 ## API
 
@@ -50,7 +53,7 @@ Open WebUI injection filter see
 | Endpoint | Purpose |
 |---|---|
 | `/mcp` | MCP Streamable HTTP: the tools below |
-| `GET /digest?expert=<slug>` | Injection digest (`text/markdown`): session context, profile, goals, last 5 decisions, last session log entry — capped to a few hundred tokens |
+| `GET /digest?expert=<slug>` | Injection digest (`text/markdown`): session context, profile, goals, last 5 decisions, mastery (when `state/mastery.json` exists), last session log entry — capped to a few hundred tokens |
 | `GET /healthz` | Liveness |
 
 ### MCP tools
@@ -66,10 +69,15 @@ Open WebUI injection filter see
 | `update_profile` | Replace profile.md wholesale |
 | `append_session_log` | Append a dated session summary |
 | `set_session_context` | Ephemeral scratch context, 24h TTL, outside git |
+| `set_state` | Store machine-generated structured state (arbitrary JSON) at `state/<key>.json`, git-committed |
+| `get_state` | Read back state written by `set_state` as raw JSON |
 | `create_expert` | Scaffold a new expert's memory space |
 
 Per-expert layout: `profile.md`, `goals.md`, `decisions.md`, `log.md`,
-`notes/<topic>.md`.
+`notes/<topic>.md`, plus `state/<key>.json` for machine-written
+structured state. State lives in git like the rest of memory but is
+deliberately invisible to `search_memory` and `read_many` — it is data,
+not prose.
 
 **Security posture**: both endpoints are unauthenticated by design and
 must only be reachable on a trusted private network. See the warning

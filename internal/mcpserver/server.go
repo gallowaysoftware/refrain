@@ -16,6 +16,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -41,6 +42,8 @@ type memoryStore interface {
 	ReplaceFile(expert, file, content string) error
 	AppendSessionLog(expert, summary string) error
 	SetSessionContext(expert, context string) error
+	SetState(expert, key string, value json.RawMessage) error
+	GetState(expert, key string) (json.RawMessage, error)
 	Digest(expert string) (string, error)
 }
 
@@ -131,6 +134,20 @@ func Handler(deps Deps) http.Handler {
 			"Ephemeral scratch with a 24h TTL — not memory. Use at session start or when the " +
 			"user states what they're working on right now.",
 	}, deps.setSessionContext)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "set_state",
+		Description: "Store machine-generated structured state for an expert (arbitrary JSON) " +
+			"at state/<key>.json, git-committed. This is the durable channel for data a companion " +
+			"tool computes (course mastery, sync positions) — NOT prose memory: search_memory and " +
+			"read_many never surface it. Read it back with get_state.",
+	}, deps.setState)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "get_state",
+		Description: "Read back structured state written by set_state, as raw JSON. " +
+			"Errors when the key has never been set for the expert.",
+	}, deps.getState)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "create_expert",
@@ -321,6 +338,53 @@ func (d Deps) setSessionContext(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, ackOutput{}, err
 	}
 	return nil, ackOutput{OK: true}, nil
+}
+
+// stateInput.Value is `any` so the tool schema advertises an
+// unrestricted JSON value — json.RawMessage would infer as an array of
+// bytes and lie to clients about what set_state accepts.
+type stateInput struct {
+	Expert string `json:"expert" jsonschema:"expert slug"`
+	Key    string `json:"key" jsonschema:"lowercase-slug state key, e.g. mastery"`
+	Value  any    `json:"value" jsonschema:"arbitrary JSON object"`
+}
+
+func (d Deps) setState(ctx context.Context, _ *mcp.CallToolRequest, in stateInput) (*mcp.CallToolResult, ackOutput, error) {
+	if in.Value == nil {
+		return nil, ackOutput{}, fmt.Errorf("value is required")
+	}
+	raw, err := json.Marshal(in.Value)
+	if err != nil {
+		return nil, ackOutput{}, fmt.Errorf("marshal state value: %w", err)
+	}
+	if err := d.Store.SetState(in.Expert, in.Key, raw); err != nil {
+		return nil, ackOutput{}, err
+	}
+	return nil, ackOutput{OK: true}, nil
+}
+
+type getStateInput struct {
+	Expert string `json:"expert" jsonschema:"expert slug"`
+	Key    string `json:"key" jsonschema:"lowercase-slug state key, e.g. mastery"`
+}
+
+type stateOutput struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
+}
+
+func (d Deps) getState(ctx context.Context, _ *mcp.CallToolRequest, in getStateInput) (*mcp.CallToolResult, stateOutput, error) {
+	raw, err := d.Store.GetState(in.Expert, in.Key)
+	if err != nil {
+		return nil, stateOutput{}, err
+	}
+	// Round-trip through `any` so the structured output is the decoded
+	// JSON value, not a quoted string containing JSON.
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, stateOutput{}, fmt.Errorf("decode stored state: %w", err)
+	}
+	return nil, stateOutput{Key: in.Key, Value: value}, nil
 }
 
 type createExpertInput struct {

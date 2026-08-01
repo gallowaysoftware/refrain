@@ -16,6 +16,7 @@ TTL). Design rationale: `docs/design.md`.
 | `internal/mcpserver` | MCP tools (Streamable HTTP) + the plain-HTTP digest handler |
 | `deploy/` | Reference compose stack (macvlan) + Dockerfile |
 | `integrations/openwebui/` | Inlet filter that injects the digest at chat start |
+| `integrations/claudecode/` | SessionStart hook that injects the digest into Claude Code sessions |
 
 ## Conventions
 

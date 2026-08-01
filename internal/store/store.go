@@ -19,6 +19,8 @@
 package store
 
 import (
+	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -244,7 +247,11 @@ func (s *Store) ReadFile(expert, file string) (string, error) {
 	return string(b), nil
 }
 
-// ListFiles returns the memory files present for an expert.
+// ListFiles returns the memory files present for an expert. Only the
+// core markdown files and notes/ are memory: the state/ subtree holds
+// machine-written JSON (see SetState) and is deliberately excluded, so
+// Search and ReadFiles — both driven by this list — can never surface
+// structured state as if it were prose memory.
 func (s *Store) ListFiles(expert string) ([]string, error) {
 	dir, err := s.expertDir(expert)
 	if err != nil {
@@ -597,8 +604,146 @@ func (s *Store) SessionContext(expert string) (string, error) {
 	return sess.Context, nil
 }
 
+// SetState writes machine-generated structured state at
+// <expert>/state/<key>.json (pretty-printed) and commits it. State is
+// the durable channel for data a companion tool computes — course
+// mastery, counters, sync positions — that is NOT prose memory: it
+// lives in git like everything else (auditable, revertible) but
+// ListFiles excludes it, so search and read_many never see it.
+func (s *Store) SetState(expert, key string, value json.RawMessage) error {
+	if !noteSlug.MatchString(key) {
+		return fmt.Errorf("invalid state key %q (want lowercase slug)", key)
+	}
+	if len(value) == 0 || !json.Valid(value) {
+		return fmt.Errorf("state value for %q is not valid JSON", key)
+	}
+	dir, err := s.expertDir(expert)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("expert %s: %w", expert, ErrNotFound)
+	}
+	// Re-encode rather than storing the caller's bytes: one canonical
+	// layout keeps git diffs of machine writes minimal and reviewable.
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, value, "", "  "); err != nil {
+		return fmt.Errorf("format state %q: %w", key, err)
+	}
+	buf.WriteByte('\n')
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, key+".json"), buf.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("write state %q: %w", key, err)
+	}
+	if out, err := s.commitLocked([]string{filepath.Join(expert, "state", key+".json")},
+		fmt.Sprintf("refrain(%s): state: set %s", expert, key)); err != nil {
+		return fmt.Errorf("commit state: %s: %w", out, err)
+	}
+	return nil
+}
+
+// GetState returns the raw JSON stored for key, or ErrNotFound when the
+// key has never been set.
+func (s *Store) GetState(expert, key string) (json.RawMessage, error) {
+	if !noteSlug.MatchString(key) {
+		return nil, fmt.Errorf("invalid state key %q (want lowercase slug)", key)
+	}
+	dir, err := s.expertDir(expert)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "state", key+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%s state %q: %w", expert, key, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read state %q: %w", key, err)
+	}
+	return b, nil
+}
+
+// masteryState mirrors the course-progress document a study tool writes
+// via set_state (etude's state/mastery.json). Every field is optional:
+// a partial file renders what it has and unknown keys are ignored, so
+// the digest survives a writer ahead of or behind this schema.
+type masteryState struct {
+	Coverage struct {
+		Questions   int `json:"questions"`
+		Attempted   int `json:"attempted"`
+		Mastered    int `json:"mastered"`
+		MasteredPct int `json:"mastered_pct"`
+	} `json:"coverage"`
+	Due        int `json:"due"`
+	Blindspots []struct {
+		Topic string `json:"topic"`
+		Note  string `json:"note"`
+	} `json:"blindspots"`
+	WeakUnits []struct {
+		Unit        string `json:"unit"`
+		MasteredPct int    `json:"mastered_pct"`
+	} `json:"weak_units"`
+}
+
+// masterySection renders the digest's "## Mastery" block from
+// state/mastery.json, or "" when the file is absent or malformed —
+// machine-written state must never break the digest.
+func (s *Store) masterySection(expert string) string {
+	raw, err := s.GetState(expert, "mastery")
+	if err != nil {
+		return "" // absent is the common case; read errors degrade the same
+	}
+	var m masteryState
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Mastery\n")
+	c := m.Coverage
+	fmt.Fprintf(&b, "Coverage: %d/%d questions mastered (%d%%; %d attempted)\n",
+		c.Mastered, c.Questions, c.MasteredPct, c.Attempted)
+	if m.Due > 0 {
+		fmt.Fprintf(&b, "Due for review: %d\n", m.Due)
+	}
+	if n := len(m.Blindspots); n > 0 {
+		b.WriteString("Blindspots:\n")
+		for i, bl := range m.Blindspots {
+			if i == 5 { // the digest is capped context; the file keeps the rest
+				fmt.Fprintf(&b, "- …and %d more\n", n-i)
+				break
+			}
+			fmt.Fprintf(&b, "- %s — %s\n", bl.Topic, capRunes(bl.Note, 120))
+		}
+	}
+	if n := len(m.WeakUnits); n > 0 {
+		// Weakest first, so the top of the list is where study time goes;
+		// unit name breaks ties to keep the render deterministic.
+		units := slices.Clone(m.WeakUnits)
+		slices.SortFunc(units, func(a, b struct {
+			Unit        string `json:"unit"`
+			MasteredPct int    `json:"mastered_pct"`
+		}) int {
+			return cmp.Or(cmp.Compare(a.MasteredPct, b.MasteredPct), cmp.Compare(a.Unit, b.Unit))
+		})
+		b.WriteString("Weak units:\n")
+		for i, u := range units {
+			if i == 5 {
+				fmt.Fprintf(&b, "- …and %d more\n", n-i)
+				break
+			}
+			fmt.Fprintf(&b, "- %s — %d%% mastered\n", u.Unit, u.MasteredPct)
+		}
+	}
+	return b.String()
+}
+
 // Digest composes the injection-designed markdown block: session
-// context, profile, goals, recent decisions, last session log entry.
+// context, profile, goals, recent decisions, mastery, last session log
+// entry.
 // This is the always-in-context core (Letta-style); the harness injects
 // it at chat start, so it must stay compact — sections are individually
 // capped and the caller-facing contract is "a few hundred tokens".
@@ -623,6 +768,11 @@ func (s *Store) Digest(expert string) (string, error) {
 			fmt.Fprintf(&b, "\n## Recent decisions\n%s\n", capRunes(recent, 2500))
 		}
 	}
+	// Mastery sits after the stable sections and before the rotating
+	// tail: "Current session" and "Last session" turn over constantly,
+	// and a placement among them would let one churning slot push
+	// persistent progress data out of the reader's attention.
+	b.WriteString(s.masterySection(expert))
 	if log, err := s.ReadFile(expert, "log.md"); err == nil {
 		if last := lastEntries(log, 1); last != "" {
 			fmt.Fprintf(&b, "\n## Last session\n%s\n", capRunes(last, 1500))
