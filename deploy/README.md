@@ -21,7 +21,24 @@ The reference compose file assumes a pre-existing macvlan network named
 IP. If that isn't your pattern, replace the `networks` block with a
 bridge network and publish port 8092.
 
-On Unraid, add these labels to the service for a WebUI link and shell:
+## Unraid / Compose Manager
+
+Compose Manager does not run the stack from a checkout — it requires the
+compose file to live in its own `projects/<name>/docker-compose.yml`. The
+default `context: ..` then resolves to the projects directory instead of
+the repo root, and `docker compose up -d` fails to build with no obvious
+clue why. Point `REFRAIN_SRC` at the checkout so the build context stays
+correct wherever the compose file was pasted:
+
+```
+REFRAIN_SRC=/mnt/user/appdata/refrain/src
+```
+
+The checkout has to be reachable from the Docker host, so keep it on a
+share rather than inside the compose project directory (Unraid's flash
+device is FAT-formatted and a poor place for source).
+
+Add these labels to the service for a WebUI link and shell:
 
 ```yaml
     labels:

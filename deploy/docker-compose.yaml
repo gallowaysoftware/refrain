@@ -19,7 +19,12 @@
 services:
   refrain:
     build:
-      context: ..
+      # Defaults to the repo root, so `docker compose up -d --build` from
+      # this directory just works. Override REFRAIN_SRC when the compose
+      # file is copied somewhere else and `..` no longer means the repo —
+      # notably Unraid's Compose Manager, which requires the file to live
+      # in its own projects/<name>/ directory (see README).
+      context: ${REFRAIN_SRC:-..}
       dockerfile: deploy/Dockerfile
     container_name: refrain
     restart: unless-stopped
