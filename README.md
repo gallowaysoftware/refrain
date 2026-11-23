@@ -92,3 +92,7 @@ make vet
 make lint      # golangci-lint
 make fmt-check
 ```
+
+## License
+
+Copyright (c) 2026 Galloway Software Solutions Inc. All rights reserved. No licence has been granted for this code yet.
