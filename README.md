@@ -95,4 +95,4 @@ make fmt-check
 
 ## License
 
-Copyright (c) 2026 Galloway Software Solutions Inc. All rights reserved. No licence has been granted for this code yet.
+MIT — see [LICENSE](LICENSE).
